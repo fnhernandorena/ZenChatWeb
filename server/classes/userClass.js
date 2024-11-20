@@ -21,6 +21,18 @@ class User {
     const isMatch = await bcrypt.compare(inputPassword, storedHash); // Compare input password with stored hash
     return isMatch; // Return true if passwords match, false otherwise
   }
+
+  // Static method to check if a username or email already exists in the database
+  static async isUnique(username, mail, db) {
+    try {
+      const query = `SELECT * FROM users WHERE username = ? OR mail = ?`;
+      const result = await db.execute(query, [username, mail]);
+      return result.rows.length === 0; // Return true if no user exists, false otherwise
+    } catch (error) {
+      console.error('Error checking uniqueness:', error);
+      throw error;
+    }
+  }
 }
 
 export default User;

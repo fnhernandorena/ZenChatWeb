@@ -1,71 +1,77 @@
-import bcrypt from 'bcryptjs';
-import jwt from 'jsonwebtoken'; // Import JSON Web Token for generating and verifying tokens
-import UserRepository from '../repositories/userRepository'; // User repository for database interactions
-import User from '../classes/userClass'; // User model
+import UserRepository from '../repositories/userRepository.js'; // User repository for database interactions
+import User from '../classes/userClass.js'; // User model
+import { generateToken } from '../middlewares/authMiddleware.js'; // Import the token generation middleware
 
-// Secret key for signing JWT (should be a secure, unique value)
-const JWT_SECRET = process.env.JWT_SECRET || 'your-secret-key';
+// Static method to get a user by username
+export const getUserByUsername = async (username) => {
+  try {
+    const user = await UserRepository.findUserIdByUsername(username); // Assuming this method exists in your UserRepository
+    if (!user) {
+      throw new Error('User not found');
+    }
+    return user;
+  } catch (error) {
+    throw new Error(error.message);
+  }
+};
 
 // Signup function to register a new user
-export const signup = async (req, res) => {
+export const signup = async (req, res, next) => {
+  const { username, mail, password } = req.body;
+ 
   try {
-    const { username, mail, password } = req.body;
+    // Check if username or email is already in use
+    const userExists = await UserRepository.findByEmail(mail);
+    if (userExists) {
+      return res.status(400).send({ message: 'Username or email already in use' });
+    }
 
-    // Create a new User object (password will be hashed)
+    // Create a new user object (password will be hashed)
     const user = new User(username, mail, password);
+     // Wait for the password hashing to complete
+     await user.setPassword(password);  // Ensure that the password is hashed before saving
 
-    // Save the new user to the database
     await UserRepository.create(user);
 
-    res.status(201).send({ message: 'User created successfully' });
+    // Add user to the request object for use in the token generation middleware
+    req.user = user;
+
+    // Call the next middleware (generate token)
+    generateToken(req, res, () => {
+      // Send response with token
+      res.status(201).send({ message: 'User created successfully', token: res.token });
+    });
   } catch (error) {
     res.status(500).send({ message: 'Error creating user', error: error.message });
   }
 };
 
 // Signin function to login an existing user
-export const signin = async (req, res) => {
+export const signin = async (req, res, next) => {
   const { mail, password } = req.body;
 
   try {
     // Check if the user exists by email
     const user = await UserRepository.findByEmail(mail);
-
     if (!user) {
       return res.status(404).send({ message: 'User not found' });
     }
 
-    // Validate the password using bcrypt
+    // Validate the password
     const isPasswordValid = await User.validatePassword(password, user.passwordHash);
     if (!isPasswordValid) {
       return res.status(401).send({ message: 'Invalid credentials' });
     }
 
-    // If valid, create a JWT token
-    const token = jwt.sign({ userId: user.userId, username: user.username }, JWT_SECRET, {
-      expiresIn: '1h', // Token expires in 1 hour
-    });
+    // Add user to the request object for use in the token generation middleware
+    req.user = user;
 
-    res.status(200).send({ message: 'Login successful', token });
+    // Call the next middleware (generate token)
+    generateToken(req, res, () => {
+      // Send response with token
+      res.status(200).send({ message: 'Login successful', token: res.token });
+    });
   } catch (error) {
     res.status(500).send({ message: 'Error during login', error: error.message });
-  }
-};
-
-// Middleware to verify JWT in protected routes
-export const verifyToken = (req, res, next) => {
-  const token = req.header('Authorization')?.split(' ')[1]; // Get token from Authorization header
-
-  if (!token) {
-    return res.status(401).send({ message: 'Access denied, no token provided' });
-  }
-
-  try {
-    // Verify the token
-    const decoded = jwt.verify(token, JWT_SECRET);
-    req.user = decoded; // Attach decoded user data to the request
-    next(); // Move to the next middleware or route handler
-  } catch (error) {
-    res.status(400).send({ message: 'Invalid or expired token' });
   }
 };
